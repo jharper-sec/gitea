@@ -1,0 +1,89 @@
+name: Go
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build-ubuntu:
+    name: Build Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.15
+      id: go
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+    
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2
+    
+    - name: Configure Environment
+      run: |
+        echo "CONTRAST_AGENT_VERSION=0.2.3" >> $GITHUB_ENV
+        echo "CONTRAST_DEB_VERSION=0.2.3-1~0-g07d6ad8" >> $GITHUB_ENV
+        echo "S3_BASE_DIR=s3://contrast-golang-agent/apps/${GITHUB_REPOSITORY}/run-${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV        
+
+    - name: Download the Contrast Agent
+      run: |
+        curl -L https://pkg.contrastsecurity.com/artifactory/debian-staging/pool/contrast-go_${CONTRAST_DEB_VERSION}_amd64.deb -o contrast-go.deb
+        sudo dpkg -i contrast-go.deb
+        
+#     - name: Download the Contrast Agent
+#       run: |
+#         aws s3 cp s3://contrast-golang-agent/$CONTRAST_AGENT_VERSION/linux/amd64/contrast-go ./contrast-go
+#         chmod u+x ./contrast-go
+      
+    - name: Get Go dependencies
+      run: |
+        go get -v -t -d ./...
+
+    - name: Build
+      run: go build -v -o ./bin/gitea . > build-go-normal.log 2>&1
+
+    - name: Build with Contrast - No Dataflow
+      run: contrast-go -v -save build -race -o ./bin/gitea-no-dataflow . > contrast-build-no-dataflow.log 2>&1
+      continue-on-error: true
+        
+    - name: Build with Contrast - With Dataflow
+      run: contrast-go -dataflow -v -save build -race -o ./bin/gitea-dataflow . > contrast-build-dataflow.log 2>&1
+      continue-on-error: true
+    
+    - name: Copy Log Files to S3
+      run: |
+        aws s3 cp ./build-go-normal.log ${S3_BASE_DIR}/logs/build-go-normal.log
+        aws s3 cp ./contrast-build-no-dataflow.log ${S3_BASE_DIR}/logs/contrast-build-no-dataflow.log
+        aws s3 cp ./contrast-build-dataflow.log ${S3_BASE_DIR}/logs/contrast-build-dataflow.log
+    
+    - name: Copy Binaries to S3
+      run: |
+        aws s3 cp ./bin/gitea ${S3_BASE_DIR}/bin/gitea
+        aws s3 cp ./bin/gitea-no-dataflow ${S3_BASE_DIR}/bin/gitea-no-dataflow
+        aws s3 cp ./bin/gitea-dataflow ${S3_BASE_DIR}/bin/gitea-dataflow\
+      continue-on-error: true
+        
+    - name: Copy Rewritten Source to S3
+      run: |
+        tar -czvf ./contrast-go-save.tar.gz /tmp/contrast/go/
+        aws s3 cp ./contrast-go-save.tar.gz ${S3_BASE_DIR}/save/contrast-go-save.tar.gz
+    
+    - name: Set Contrast Session Metadata
+      run: |
+        export CONTRAST__APPLICATION__SESSION_METADATA="commitHash=$GITHUB_SHA,committer=$GITHUB_ACTOR,branchName=$GITHUB_REF,repository=$GITHUB_REPOSITORY,buildNumber=$GITHUB_RUN_NUMBER"
+        echo $CONTRAST__APPLICATION__SESSION_METADATA
+    
+    - name: Contrast Agent Docker Build
+      run: |
+        echo -e 'FROM scratch\nCOPY ./bin/gitea-no-dataflow ./gitea-no-dataflow\nENTRYPOINT ["./gitea-no-dataflow"]' > Dockerfile-tmp
+        docker build . -f Dockerfile-tmp -t gitea-contrast:latest -t gitea-contrast:$CONTRAST_AGENT_VERSION
