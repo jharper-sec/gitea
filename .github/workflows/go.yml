@@ -31,13 +31,13 @@ jobs:
     
     - name: Configure Environment
       run: |
-        echo "CONTRAST_AGENT_VERSION=0.2.3" >> $GITHUB_ENV
-        echo "CONTRAST_DEB_VERSION=0.2.3-1~0-g07d6ad8" >> $GITHUB_ENV
+        echo "CONTRAST_AGENT_VERSION=0.3.4" >> $GITHUB_ENV
+        echo "CONTRAST_DEB_VERSION=0.3.4-1~bionic" >> $GITHUB_ENV
         echo "S3_BASE_DIR=s3://contrast-golang-agent/apps/${GITHUB_REPOSITORY}/run-${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV        
 
     - name: Download the Contrast Agent
       run: |
-        curl -L https://pkg.contrastsecurity.com/artifactory/debian-staging/pool/contrast-go_${CONTRAST_DEB_VERSION}_amd64.deb -o contrast-go.deb
+        curl -L https://contrastsecurity.jfrog.io/artifactory/debian-public/pool/contrast-go_${CONTRAST_DEB_VERSION}_amd64.deb -o contrast-go.deb
         sudo dpkg -i contrast-go.deb
         
 #     - name: Download the Contrast Agent
